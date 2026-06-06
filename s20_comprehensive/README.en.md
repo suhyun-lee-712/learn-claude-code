@@ -1,6 +1,6 @@
 # s20: Comprehensive Agent — All Mechanisms, One Loop
 
-[中文](README.md) · [English](README.en.md) · [日本語](README.ja.md)
+[中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 s01 → ... → s18 → s19 → `s20`
 

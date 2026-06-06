@@ -1,6 +1,6 @@
 # s16: Team Protocols — Teammates Need Agreements
 
-[中文](README.md) · [English](README.en.md) · [日本語](README.ja.md)
+[中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 s01 → ... → s14 → s15 → `s16` → [s17](../s17_autonomous_agents/) → s18 → s19 → s20
 > *"Teammates need agreements"* — request-response pattern drives all negotiation.

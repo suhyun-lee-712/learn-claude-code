@@ -1,6 +1,6 @@
 # s16: Team Protocols — チームメイト間には取り決めが必要
 
-[中文](README.md) · [English](README.en.md) · [日本語](README.ja.md)
+[中文](README.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 s01 → ... → s14 → s15 → `s16` → [s17](../s17_autonomous_agents/) → s18 → s19 → s20
 > *"チームメイト間には取り決めが必要"* — request-response パターンが全てのネゴシエーションを駆動。
