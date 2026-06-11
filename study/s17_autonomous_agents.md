@@ -505,22 +505,3 @@ alice: WORK(cycle=1) → IDLE → auto-claim addition  → WORK(cycle=2)
 
 하나의 태스크를 마칠 때마다 IDLE로 돌아가 새 태스크를 찾는 WORK↔IDLE 반복 구조가 실제로 동작하는 모습이다.
 
-**③ alice의 workspace 경로 이탈 시도 (Case 1)**
-
-```
-[DBG:teammate:alice] tool=write_file input={"path": "/output/addition.js", ...}
-[DBG:teammate:alice] tool_result: Error: Path escapes workspace: /output/addition.js
-```
-
-Case 1에서 alice는 claim이 전부 실패하자 `/output/` 경로에 파일을 쓰려 했다. `safe_path()` 체크가 `WORKDIR` 외부 경로를 차단했다.
-
-**④ 이전 실행 잔여 메시지가 inject됨 (Case 2 시작 시)**
-
-```
-[DBG:bus:inbox] lead received 2 message(s):
-  from=bob  type=result | ✅ All tasks are completed! ...  ← Case 1의 잔여 메시지
-  from=alice type=result | All three tasks are already...
-[Inbox: 2 messages injected]
-```
-
-Case 1에서 alice/bob이 result를 lead inbox에 남겼지만, 그 이후 사용자 입력이 없어서 `consume_lead_inbox`가 호출되지 않았다. Case 2의 첫 번째 입력이 들어왔을 때 비로소 inject됐다. 재실행 시 `.mailboxes/` 디렉터리를 정리하지 않으면 이전 실행의 메시지가 다음 세션에 영향을 줄 수 있다.
