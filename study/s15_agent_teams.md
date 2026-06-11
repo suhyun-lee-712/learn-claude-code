@@ -331,3 +331,209 @@ python s15_agent_teams/code.py
 - `.mailboxes/` 디렉터리에 JSONL 파일이 어떻게 생기는가?
 - teammate가 끝난 후 Lead inbox가 history에 주입되는가?
 - 두 teammate가 병렬로 작업하는가?
+
+---
+
+## 실행 로그 (Debug 모드)
+
+```sh
+python s15_agent_teams/code.py --debug
+```
+
+<details>
+<summary>전체 로그 펼치기</summary>
+
+```
+  [cron] scheduler thread started
+s15: agent teams
+[debug mode ON — set DEBUG=0 or remove --debug to disable]
+Enter a question, press Enter to send. Type q to quit.
+
+s15 >> Spawn alice as a backend developer. Ask her to create a file called schema.sql with a users table.
+[DBG:lead] system prompt:
+You are a coding agent. Act, don't explain.
+
+Available tools: bash, read_file, write_file, get_task, create_task, list_tasks, claim_task, complete_task, schedule_cron, list_crons, cancel_cron, spawn_teammate, send_message, check_inbox.
+
+Working directory: /Users/suhyun.lee/workspace/learn-claude-code/sandbox
+
+Relevant memories:
+- [user-preference-tabs](user-preference-tabs.md) — User prefers tabs for indentation over spaces
+[DBG:lead] sending 1 message(s) to LLM
+[DBG:lead] stop_reason=tool_use input_tokens=1631 output_tokens=244
+> spawn_teammate
+[DBG:lead] tool=spawn_teammate input={"name": "alice", "role": "backend developer", "prompt": "You are Alice, a backend developer. ..."}
+[DBG:teammate:alice] system prompt: You are 'alice', a backend developer. Use tools to complete tasks. Send results via send_message to 'lead'.
+[DBG:teammate:alice] initial prompt: You are Alice, a backend developer. ...
+[DBG:teammate:alice] ── round 1 ──
+  [teammate] alice spawned as backend developer
+Teammate 'alice' spawned as backend developer
+[DBG:lead] tool_result: Teammate 'alice' spawned as backend developer
+> send_message
+[DBG:lead] tool=send_message input={"to": "alice", "content": "Hi Alice! Please create a file called `schema.sql` ..."}
+[DBG:bus:inbox] alice → (empty)
+  [bus] lead → alice: Hi Alice! Please create a file called `schema.sql`
+[DBG:bus:send] type=message | full content: Hi Alice! Please create a file called `schema.sql` in the working directory with a `users` table. Include common fields like id, name, email, created_at, etc.
+Sent to alice
+[DBG:lead] tool_result: Sent to alice
+[DBG:lead] sending 3 message(s) to LLM
+[DBG:teammate:alice] stop_reason=end_turn msgs_in_context=1
+[DBG:teammate:alice] final text: Understood! I'm Alice, the backend developer. I'm ready and waiting for instructions from the Lead.
+  [bus] alice → lead: Understood! I'm Alice, the backend developer. I'm
+[DBG:bus:send] type=result | full content: Understood! I'm Alice, the backend developer. I'm ready and waiting for instructions from the Lead.
+  [teammate] alice finished
+[DBG:lead] stop_reason=tool_use input_tokens=1953 output_tokens=47
+> check_inbox
+[DBG:bus:inbox] lead received 1 message(s):
+[DBG:bus:inbox]   from=alice type=result | Understood! I'm Alice, the backend developer. ...
+[DBG:lead] stop_reason=tool_use input_tokens=2062 output_tokens=54
+> check_inbox
+[DBG:bus:inbox] lead → (empty)
+(inbox empty)
+[DBG:lead] stop_reason=tool_use input_tokens=2130 output_tokens=36
+> check_inbox
+[DBG:bus:inbox] lead → (empty)
+(inbox empty)
+[DBG:lead] stop_reason=tool_use input_tokens=2180 output_tokens=133
+> bash
+[DBG:lead] tool=bash input={"command": "ls .../schema.sql 2>/dev/null && cat .../schema.sql"}
+(no output)
+[DBG:lead] stop_reason=tool_use input_tokens=2327 output_tokens=199
+> write_file
+[DBG:lead] tool=write_file input={"path": ".../schema.sql", "content": "-- Users table\nCREATE TABLE users (\n\tid SERIAL PRIMARY KEY, ..."}
+Wrote 264 bytes to .../schema.sql
+[DBG:lead] stop_reason=end_turn input_tokens=2568 output_tokens=215
+
+Done! Here's a summary of what was set up:
+- ✅ Alice was spawned as a backend developer and messaged with the task.
+- ✅ schema.sql was created at sandbox/schema.sql with a users table.
+
+s15 >> Check your inbox for alice's result.
+[DBG:lead] sending 15 message(s) to LLM
+> check_inbox
+[DBG:bus:inbox] lead → (empty)
+(inbox empty)
+Inbox is still empty — Alice hasn't sent back a result yet.
+
+s15 >> Spawn bob as a tester. Ask him to check if schema.sql exists and list its contents.
+[DBG:lead] sending 19 message(s) to LLM
+> spawn_teammate
+[DBG:lead] tool=spawn_teammate input={"name": "bob", "role": "tester", ...}
+[DBG:teammate:bob] system prompt: You are 'bob', a tester. Use tools to complete tasks. Send results via send_message to 'lead'.
+[DBG:teammate:bob] ── round 1 ──
+  [teammate] bob spawned as tester
+> send_message
+[DBG:lead] tool=send_message input={"to": "bob", "content": "Hi Bob! Please check if schema.sql exists ..."}
+[DBG:bus:inbox] bob → (empty)
+  [bus] lead → bob: Hi Bob! Please check if the file `schema.sql` exis
+Sent to bob
+[DBG:lead] sending 21 message(s) to LLM
+[DBG:teammate:bob] stop_reason=tool_use msgs_in_context=1
+[DBG:teammate:bob] tool=send_message input={"to": "lead", "content": "Hi, this is Bob (tester). I'm online and ready ..."}
+  [bus] bob → lead: Hi, this is Bob (tester). I'm online and ready to
+[DBG:teammate:bob] ── round 2 ──
+[DBG:bus:inbox] bob received 1 message(s):
+[DBG:bus:inbox]   from=lead type=message | Hi Bob! Please check if the file `schema.sql` exists ...
+[DBG:lead] stop_reason=tool_use input_tokens=3290 output_tokens=36
+> check_inbox
+[DBG:bus:inbox] lead received 1 message(s):
+[DBG:bus:inbox]   from=bob type=message | Hi, this is Bob (tester). I'm online and ready ...
+[DBG:lead] sending 25 message(s) to LLM
+[DBG:teammate:bob] stop_reason=tool_use msgs_in_context=4
+[DBG:teammate:bob] tool=bash input={"command": "ls .../schema.sql 2>&1"}
+[DBG:teammate:bob] tool_result: .../schema.sql
+[DBG:teammate:bob] tool=read_file input={"path": ".../schema.sql"}
+[DBG:teammate:bob] tool_result:
+-- Users table
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+[DBG:teammate:bob] ── round 3 ──
+[DBG:bus:inbox] bob → (empty)
+[DBG:lead] stop_reason=tool_use input_tokens=3374 output_tokens=49
+> check_inbox
+[DBG:bus:inbox] lead → (empty)
+(inbox empty)
+[DBG:lead] stop_reason=tool_use input_tokens=3437 output_tokens=126
+> bash
+[DBG:lead] tool=bash input={"command": "ls .../schema.sql && cat .../schema.sql"}
+.../schema.sql
+--- FILE CONTENTS ---
+-- Users table
+CREATE TABLE users ( ... );
+[DBG:lead] sending 29 message(s) to LLM
+[DBG:teammate:bob] stop_reason=tool_use msgs_in_context=6
+[DBG:teammate:bob] tool=send_message input={"to": "lead", "content": "Hi Lead, here are my findings:\n\n✅ File EXISTS\n\nFull Contents: CREATE TABLE users (...)"}
+  [bus] bob → lead: Hi Lead, here are my findings: ...
+[DBG:teammate:bob] ── round 4 ──
+[DBG:bus:inbox] bob → (empty)
+[DBG:teammate:bob] stop_reason=end_turn msgs_in_context=8
+[DBG:teammate:bob] final text: I've reported back to the Lead with the full findings. Standing by for further instructions!
+  [bus] bob → lead: I've reported back to the Lead with the full findi
+  [teammate] bob finished
+[DBG:lead] stop_reason=end_turn input_tokens=3683 output_tokens=108
+
+Here's the verification result:
+- ✅ schema.sql exists at sandbox/schema.sql
+- ✅ Contents look good — the users table is properly defined.
+
+[DBG:bus:inbox] lead received 2 message(s):
+[DBG:bus:inbox]   from=bob type=message | Hi Lead, here are my findings: ...
+[DBG:bus:inbox]   from=bob type=result  | I've reported back to the Lead with the full findings. ...
+[DBG:lead:inject] injecting 2 inbox message(s) into history:
+[DBG:lead:inject]   from=bob type=message | Hi Lead, here are my findings: ...
+[DBG:lead:inject]   from=bob type=result  | I've reported back to the Lead with the full findings. ...
+
+[Inbox: 2 messages injected]
+```
+
+</details>
+
+### 이 로그에서 주목할 점
+
+**① alice가 메시지를 못 받는 타이밍 문제**
+
+```
+[DBG:teammate:alice] ── round 1 ──       ← alice가 먼저 시작
+[DBG:bus:inbox] alice → (empty)          ← inbox 비어있음 (Lead가 아직 send_message 전)
+[DBG:teammate:alice] stop_reason=end_turn ← 할 일 없으니 종료
+  [teammate] alice finished
+
+(나중에) [bus] lead → alice: Hi Alice! ...  ← 편지를 보냈지만 alice는 이미 없음
+```
+
+spawn과 send_message 사이에 타이밍 차이가 있다. alice가 round 1을 먼저 돌고 종료된 뒤 메시지가 도착했다. 이것이 s15 교육용 코드의 10라운드 제한 방식이 가진 한계다. 실제 CC의 idle loop라면 alice가 메시지를 기다리고 있었을 것이다.
+
+**② Lead가 직접 보완**
+
+alice가 응답하지 않자 Lead가 alice의 inbox를 몇 번 확인(`check_inbox`)한 뒤, 직접 `write_file`로 schema.sql을 만들었다. Agent가 팀원에게만 의존하지 않고 스스로 판단해 보완하는 모습이다.
+
+**③ bob과의 정상적인 비동기 통신**
+
+```
+[DBG:teammate:bob] ── round 1 ──
+→ bob이 먼저 ready 메시지를 Lead에게 전송
+
+[DBG:teammate:bob] ── round 2 ──
+[DBG:bus:inbox] bob received 1 message(s): from=lead  ← Lead의 지시 도착
+→ bob이 bash + read_file로 파일 확인 후 결과 전송
+```
+
+bob은 round 1에서 자기 소개 메시지를 보내고, round 2에서 Lead의 지시를 inbox로 받아 실제 작업을 수행했다. Lead와 bob이 비동기로 동시에 실행되면서 메시지를 주고받는 흐름이 명확히 보인다.
+
+**④ 마지막 inbox injection**
+
+```
+[DBG:lead:inject] injecting 2 inbox message(s) into history:
+  from=bob type=message | Hi Lead, here are my findings: ...
+  from=bob type=result  | I've reported back to the Lead ...
+
+[Inbox: 2 messages injected]
+```
+
+bob의 결과 2개(중간 보고 + 최종 결과)가 Lead의 history에 주입됐다. 다음 사용자 입력 시 Lead LLM이 이 내용을 보고 이어서 조율할 수 있다.
