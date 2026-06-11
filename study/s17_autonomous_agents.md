@@ -495,6 +495,15 @@ s17 >> Now create 3 simple tasks on the board
 
 auto-claim 설계 의도대로 동작한 건 Case 2다.
 
+**왜 bob이 3개를 모두 가져갔나?** 팀원 system prompt에 "You can list and claim tasks from the board"가 있고, initial prompt에 "look at the task board, claim a pending task"라고 적혀있었기 때문이다. LLM이 그 지시를 따라 `list_tasks`로 태스크를 확인하고, 3개가 전부 pending 상태니까 전부 `claim_task`로 가져갔다. claim 경로가 두 가지라는 점이 핵심이다:
+
+| | LLM 주도 (WORK 단계) | idle_poll 주도 (IDLE 단계) |
+|--|---|---|
+| 주체 | LLM이 `claim_task` tool 직접 호출 | 코드가 `claim_task()` 함수 직접 호출 |
+| 조건 | LLM이 "할 일을 찾겠다"고 판단할 때 | IDLE 진입 후 폴링에서 unclaimed 발견 시 |
+
+`idle_poll`의 auto-claim은 "WORK를 마쳤는데 새 태스크가 나타났을 때"를 위한 fallback이다. LLM이 WORK 중에 이미 claim할 수 있으면 idle_poll이 끼어들 자리가 없다. 실제 사용 시 "한 번에 하나만 claim해" 같은 지시를 prompt에 추가해야 분배가 고르게 된다.
+
 **② Case 2: alice가 WORK cycle을 3번 순환**
 
 ```
