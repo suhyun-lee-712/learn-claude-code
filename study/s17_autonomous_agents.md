@@ -288,3 +288,239 @@ python s17_autonomous_agents/code.py
 - 유휴 타임아웃 60초 후 shutdown이 트리거되는가?
 - IDLE 단계의 `shutdown_request`가 즉각 응답을 받는가?
 - `.tasks/` 디렉터리의 태스크 JSON 파일 상태가 어떻게 변하는가?
+
+---
+
+## 실행 로그 (Debug 모드)
+
+```sh
+python s17_autonomous_agents/code.py --debug
+```
+
+같은 코드를 프롬프트 순서만 바꿔서 두 번 실행했다. 결과가 완전히 달랐다.
+
+| | Case 1: 태스크 먼저 | Case 2: 팀원 먼저 |
+|--|---|---|
+| 프롬프트 | "Create 3 tasks, then spawn alice and bob" | "Spawn alice and bob" → (IDLE 진입 후) "Create 3 tasks" |
+| claim 경로 | WORK 중 LLM이 직접 `claim_task` 호출 | `idle_poll` → `scan_unclaimed_tasks` → auto-claim |
+| 태스크 분배 | bob 3개 독점, alice 0개 | alice 2개, bob 1개 |
+| auto-claim 동작 | ✗ | ✓ |
+| alice WORK cycle | 1 (claim 실패, 아무것도 못함) | 1 → 2 → 3 (idle_poll로 2번 재진입) |
+
+<details>
+<summary>Case 1 전체 로그 펼치기 (태스크 먼저 생성)</summary>
+
+```
+s17 >> Create 3 *simple* tasks on the board, then spawn alice and bob. Watch them auto-claim and work.
+[DBG:lead] sending 1 message(s) to LLM
+[DBG:lead] stop_reason=tool_use input_tokens=1498 output_tokens=165
+> create_task input={"subject": "Write a Hello World function in Python"}
+  [create] Write a Hello World function in Python
+> create_task input={"subject": "Create a simple README.md file"}
+  [create] Create a simple README.md file
+> create_task input={"subject": "Write a basic addition function in JavaScript"}
+  [create] Write a basic addition function in JavaScript
+
+> spawn_teammate input={"name": "alice", ...}
+  [teammate] alice spawned as coding agent
+[DBG:teammate:alice] messages short (1), re-injecting identity
+[DBG:teammate:alice] ── WORK cycle=1 round=1 ──
+[DBG:bus:inbox] alice → (empty)
+
+> spawn_teammate input={"name": "bob", ...}
+  [teammate] bob spawned as coding agent
+[DBG:teammate:bob] messages short (1), re-injecting identity
+[DBG:teammate:bob] ── WORK cycle=1 round=1 ──
+[DBG:bus:inbox] bob → (empty)
+
+[DBG:teammate:bob] stop_reason=tool_use msgs_in_context=2
+[DBG:teammate:bob] tool=list_tasks
+[DBG:teammate:bob] ── WORK cycle=1 round=2 ──
+[DBG:bus:inbox] bob → (empty)
+[DBG:teammate:bob] stop_reason=tool_use msgs_in_context=4
+[DBG:teammate:bob] tool=claim_task input={"task_id": "task_..._1189"}
+  [claim] Write a basic addition function in JavaScript → in_progress
+[DBG:teammate:bob] tool=claim_task input={"task_id": "task_..._1454"}
+  [claim] Create a simple README.md file → in_progress
+[DBG:teammate:bob] tool=claim_task input={"task_id": "task_..._4428"}
+  [claim] Write a Hello World function in Python → in_progress
+[DBG:teammate:bob] ── WORK cycle=1 round=3 ──
+
+[DBG:teammate:alice] stop_reason=tool_use msgs_in_context=4
+[DBG:teammate:alice] tool=claim_task input={"task_id": "task_..._1189"}
+[DBG:teammate:alice] tool_result: Task task_..._1189 is in_progress, cannot claim
+[DBG:teammate:alice] tool=claim_task input={"task_id": "task_..._1454"}
+[DBG:teammate:alice] tool_result: Task task_..._1454 is in_progress, cannot claim
+[DBG:teammate:alice] tool=claim_task input={"task_id": "task_..._4428"}
+[DBG:teammate:alice] tool_result: Task task_..._4428 is in_progress, cannot claim
+[DBG:teammate:alice] ── WORK cycle=1 round=3 ──
+
+[DBG:teammate:alice] tool=write_file input={"path": "/output/addition.js", ...}
+[DBG:teammate:alice] tool_result: Error: Path escapes workspace: /output/addition.js
+[DBG:teammate:alice] tool=write_file input={"path": "/output/README.md", ...}
+[DBG:teammate:alice] tool_result: Error: Path escapes workspace: /output/README.md
+[DBG:teammate:alice] tool=write_file input={"path": "/output/hello_world.py", ...}
+[DBG:teammate:alice] tool_result: Error: Path escapes workspace: /output/hello_world.py
+
+[DBG:teammate:bob] tool=write_file input={"path": "addition.js", ...}
+  Wrote 251 bytes to addition.js
+[DBG:teammate:bob] tool=write_file input={"path": "README.md", ...}
+  Wrote 519 bytes to README.md
+[DBG:teammate:bob] tool=write_file input={"path": "hello_world.py", ...}
+  Wrote 142 bytes to hello_world.py
+
+[DBG:teammate:bob] tool=complete_task input={"task_id": "task_..._1189"}
+  [complete] Write a basic addition function in JavaScript ✓
+[DBG:teammate:bob] tool=complete_task input={"task_id": "task_..._1454"}
+  [complete] Create a simple README.md file ✓
+[DBG:teammate:bob] tool=complete_task input={"task_id": "task_..._4428"}
+  [complete] Write a Hello World function in Python ✓
+
+[DBG:teammate:alice] tool=complete_task input={"task_id": "task_..._1189"}
+[DBG:teammate:alice] tool_result: Task task_..._1189 is completed, cannot complete
+[DBG:teammate:alice] tool=complete_task input={"task_id": "task_..._1454"}
+[DBG:teammate:alice] tool_result: Task task_..._1454 is completed, cannot complete
+[DBG:teammate:alice] tool=complete_task input={"task_id": "task_..._4428"}
+[DBG:teammate:alice] tool_result: Task task_..._4428 is completed, cannot complete
+
+[DBG:teammate:bob] stop_reason=end_turn → IDLE 진입
+[DBG:idle:enter] bob entering IDLE phase
+[DBG:idle:poll] bob poll #1~12/12 → scan_unclaimed_tasks → 0 found (반복)
+  [idle] bob timeout (60s)
+[DBG:idle:timeout] bob 60s timeout → SHUTDOWN
+  [teammate] bob finished
+
+[DBG:idle:enter] alice entering IDLE phase
+[DBG:idle:poll] alice poll #1~12/12 → scan_unclaimed_tasks → 0 found (반복)
+  [idle] alice timeout (60s)
+[DBG:idle:timeout] alice 60s timeout → SHUTDOWN
+  [teammate] alice finished
+```
+
+</details>
+
+<details>
+<summary>Case 2 전체 로그 펼치기 (팀원 먼저 spawn)</summary>
+
+```
+s17 >> Spawn alice and bob. Do NOT create any tasks yet — just spawn them and wait
+[DBG:lead] stop_reason=tool_use
+> spawn_teammate input={"name": "alice", "prompt": "Wait for instructions before taking any action."}
+  [teammate] alice spawned as developer
+[DBG:teammate:alice] messages short (1), re-injecting identity
+[DBG:teammate:alice] ── WORK cycle=1 round=1 ──
+[DBG:bus:inbox] alice → (empty)
+[DBG:teammate:alice] stop_reason=end_turn
+[DBG:idle:enter] alice entering IDLE phase
+
+> spawn_teammate input={"name": "bob", "prompt": "Wait for instructions before taking any action."}
+  [teammate] bob spawned as developer
+[DBG:teammate:bob] messages short (1), re-injecting identity
+[DBG:teammate:bob] ── WORK cycle=1 round=1 ──
+[DBG:bus:inbox] bob → (empty)
+[DBG:teammate:bob] tool=list_tasks → No tasks.
+[DBG:teammate:bob] ── WORK cycle=1 round=2 ──
+[DBG:bus:inbox] bob → (empty)
+[DBG:teammate:bob] stop_reason=end_turn
+[DBG:idle:enter] bob entering IDLE phase
+
+[DBG:idle:poll] alice poll #1/12 → scan → 0 found
+[DBG:idle:poll] bob   poll #1/12 → scan → 0 found
+[DBG:idle:poll] alice poll #2/12 → scan → 0 found
+
+s17 >> Now create 3 simple tasks on the board
+> create_task: Write a basic addition function in JavaScript       → task_..._1475
+> create_task: Write a basic subtraction function in JavaScript    → task_..._5099
+> create_task: Write a basic multiplication function in JavaScript → task_..._5058
+
+[DBG:idle:poll] alice poll #3/12
+[DBG:idle:scan] alice scan_unclaimed_tasks → 3 found
+  [claim] Write a basic addition function in JavaScript → in_progress
+  [idle] alice auto-claimed: Write a basic addition function in JavaScript
+[DBG:idle:claimed] alice claimed task_..._1475 → resuming WORK
+[DBG:teammate:alice] ── WORK cycle=2 round=1 ──
+
+[DBG:idle:poll] bob poll #3/12
+[DBG:idle:scan] bob scan_unclaimed_tasks → 2 found
+  [claim] Write a basic multiplication function in JavaScript → in_progress
+  [idle] bob auto-claimed: Write a basic multiplication function in JavaScript
+[DBG:idle:claimed] bob claimed task_..._5058 → resuming WORK
+[DBG:teammate:bob] ── WORK cycle=2 round=1 ──
+
+[DBG:teammate:alice] tool=write_file input={"path": "addition.js", ...}
+  Wrote 228 bytes to addition.js
+[DBG:teammate:bob] tool=write_file input={"path": "multiply.js", ...}
+  Wrote 248 bytes to multiply.js
+
+[DBG:teammate:alice] tool=complete_task input={"task_id": "task_..._1475"}
+  [complete] Write a basic addition function in JavaScript ✓
+[DBG:teammate:alice] stop_reason=end_turn → IDLE 재진입
+
+[DBG:idle:poll] alice poll #1/12
+[DBG:idle:scan] alice scan_unclaimed_tasks → 1 found
+  [claim] Write a basic subtraction function in JavaScript → in_progress
+  [idle] alice auto-claimed: Write a basic subtraction function in JavaScript
+[DBG:idle:claimed] alice claimed task_..._5099 → resuming WORK
+[DBG:teammate:alice] ── WORK cycle=3 round=1 ──
+
+[DBG:teammate:bob] tool=complete_task input={"task_id": "task_..._5058"}
+  [complete] Write a basic multiplication function in JavaScript ✓
+[DBG:teammate:bob] stop_reason=end_turn → IDLE 재진입
+
+[DBG:teammate:alice] tool=write_file input={"path": "subtraction.js", ...}
+  Wrote 278 bytes to subtraction.js
+[DBG:teammate:alice] tool=complete_task input={"task_id": "task_..._5099"}
+  [complete] Write a basic subtraction function in JavaScript ✓
+[DBG:teammate:alice] stop_reason=end_turn → IDLE 재진입
+
+[DBG:idle:poll] bob poll #1~12/12 → scan → 0 found (반복, subtraction은 alice가 가져감)
+  [idle] bob timeout (60s) → SHUTDOWN
+  [teammate] bob finished
+
+[DBG:idle:poll] alice poll #1~12/12 → scan → 0 found (반복)
+  [idle] alice timeout (60s) → SHUTDOWN
+  [teammate] alice finished
+```
+
+</details>
+
+### 이 로그에서 주목할 점
+
+**① 프롬프트 순서가 claim 경로를 결정한다**
+
+두 케이스는 코드가 동일하다. 프롬프트 순서만 달랐을 뿐인데 claim 경로가 완전히 바뀌었다.
+
+- **Case 1**: 태스크가 먼저 있으니 LLM이 WORK 중에 `list_tasks` → `claim_task`를 스스로 호출했다. `idle_poll`의 auto-claim 경로는 동작할 기회조차 없었다.
+- **Case 2**: 팀원이 IDLE에 진입한 뒤 태스크가 생성됐다. `idle_poll`이 5초 폴링 중 `scan_unclaimed_tasks`로 태스크를 발견하고 자동으로 claim했다.
+
+auto-claim 설계 의도대로 동작한 건 Case 2다.
+
+**② Case 2: alice가 WORK cycle을 3번 순환**
+
+```
+alice: WORK(cycle=1) → IDLE → auto-claim addition  → WORK(cycle=2)
+                            → IDLE → auto-claim subtraction → WORK(cycle=3)
+                            → IDLE → 60초 → SHUTDOWN
+```
+
+하나의 태스크를 마칠 때마다 IDLE로 돌아가 새 태스크를 찾는 WORK↔IDLE 반복 구조가 실제로 동작하는 모습이다.
+
+**③ alice의 workspace 경로 이탈 시도 (Case 1)**
+
+```
+[DBG:teammate:alice] tool=write_file input={"path": "/output/addition.js", ...}
+[DBG:teammate:alice] tool_result: Error: Path escapes workspace: /output/addition.js
+```
+
+Case 1에서 alice는 claim이 전부 실패하자 `/output/` 경로에 파일을 쓰려 했다. `safe_path()` 체크가 `WORKDIR` 외부 경로를 차단했다.
+
+**④ 이전 실행 잔여 메시지가 inject됨 (Case 2 시작 시)**
+
+```
+[DBG:bus:inbox] lead received 2 message(s):
+  from=bob  type=result | ✅ All tasks are completed! ...  ← Case 1의 잔여 메시지
+  from=alice type=result | All three tasks are already...
+[Inbox: 2 messages injected]
+```
+
+Case 1에서 alice/bob이 result를 lead inbox에 남겼지만, 그 이후 사용자 입력이 없어서 `consume_lead_inbox`가 호출되지 않았다. Case 2의 첫 번째 입력이 들어왔을 때 비로소 inject됐다. 재실행 시 `.mailboxes/` 디렉터리를 정리하지 않으면 이전 실행의 메시지가 다음 세션에 영향을 줄 수 있다.
