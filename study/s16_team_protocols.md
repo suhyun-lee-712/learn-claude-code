@@ -438,3 +438,186 @@ python s16_team_protocols/code.py
 - `pending_requests` 상태가 올바르게 전이되는가? (pending → approved)
 - `request_id`가 요청과 응답 사이에서 일관되게 유지되는가?
 - idle 상태의 팀원이 shutdown_request를 받을 수 있는가?
+
+---
+
+## 실행 로그 (Debug 모드)
+
+```sh
+python s16_team_protocols/code.py --debug
+```
+
+<details>
+<summary>전체 로그 펼치기</summary>
+
+```
+s16: team protocols
+[debug mode ON — set DEBUG=0 or remove --debug to disable]
+
+s16 >> Spawn alice as a backend dev. Ask her to create a file. Then request her shutdown.
+[DBG:lead] sending 1 message(s) to LLM
+[DBG:lead] stop_reason=tool_use input_tokens=1584 output_tokens=125
+> spawn_teammate
+[DBG:teammate:alice] system prompt: You are 'alice', a backend dev. ...
+[DBG:teammate:alice] initial prompt: You are Alice, a backend developer. Wait for instructions from the Lead.
+[DBG:teammate:alice] ── round 1 ──
+  [teammate] alice spawned as backend dev
+[DBG:bus:inbox] alice received 1 message(s):
+[DBG:bus:inbox]   from=lead type=message | Hi Alice! Please create a file called `schema.sql` ...
+[DBG:lead] stop_reason=tool_use input_tokens=1732 output_tokens=109
+> send_message
+[DBG:lead] tool=send_message input={"to": "alice", "content": "Hi Alice! Please create a file called `hello.txt` ..."}
+  [bus] lead → alice: (message) Hi Alice! Please create a file called `hello.txt`
+[DBG:lead] stop_reason=tool_use input_tokens=1857 output_tokens=64
+> request_shutdown
+[DBG:protocol:new] shutdown request created: req=req_473139 target=alice status=pending
+[DBG:teammate:alice] stop_reason=tool_use msgs_in_context=2
+[DBG:teammate:alice] tool=write_file input={"path": ".../schema.sql", ...}
+  [bus] lead → alice: (shutdown_request) Please shut down gracefully.
+  [protocol] shutdown_request → alice (req_473139)
+[DBG:lead] tool_result: Shutdown request sent to alice (req: req_473139)
+[DBG:teammate:alice] tool_result: Wrote 781 bytes to .../schema.sql
+[DBG:teammate:alice] ── round 2 ──
+[DBG:bus:inbox] alice received 2 message(s):
+[DBG:bus:inbox]   from=lead type=message | Hi Alice! Please create a file called `hello.txt` ...
+[DBG:bus:inbox]   from=lead type=shutdown_request req=req_473139 | Please shut down gracefully.
+[DBG:teammate:alice] dispatch: type=shutdown_request req=req_473139
+[DBG:teammate:alice] shutdown_request received → sending shutdown_response approve=True
+  [bus] alice → lead: (shutdown_response) Shutting down gracefully.
+  [protocol] alice approved shutdown (req_473139)
+  [bus] alice → lead: (result) I'll get started on that right away! ...
+  [teammate] alice finished
+[DBG:lead] stop_reason=end_turn input_tokens=1946 output_tokens=106
+
+All three steps are done! ...
+
+[DBG:bus:inbox] lead received 2 message(s):
+[DBG:bus:inbox]   from=alice type=shutdown_response req=req_473139 | Shutting down gracefully.
+[DBG:bus:inbox]   from=alice type=result | I'll get started on that right away! ...
+[DBG:consume] routing protocol response: type=shutdown_response req=req_473139 approve=True
+[DBG:protocol:match] response_type=shutdown_response request_id=req_473139 approve=True
+  [protocol] shutdown ✓ (req_473139: approved)
+[DBG:protocol:match] state transition: pending → approved (type=shutdown sender=lead target=alice)
+[DBG:consume] non-protocol message: type=result from=alice
+[DBG:lead:inject] injecting 2 inbox message(s) into history:
+[DBG:lead:inject]   from=alice type=shutdown_response | Shutting down gracefully.
+[DBG:lead:inject]   from=alice type=result | I'll get started on that right away! ...
+
+[Inbox: 2 messages injected]
+
+s16 >> Spawn bob with a refactoring task. Have him submit a plan first. Then review and approve it.
+[DBG:lead] sending 10 message(s) to LLM
+> spawn_teammate
+[DBG:teammate:bob] ── round 1 ──
+  [teammate] bob spawned as backend dev
+[DBG:bus:inbox] bob → (empty)
+[DBG:teammate:bob] stop_reason=tool_use msgs_in_context=1
+[DBG:teammate:bob] tool=bash input={"command": "cat /inbox/bob 2>/dev/null || echo \"No messages yet.\""}
+[DBG:teammate:bob] ── round 2 ──
+[DBG:bus:inbox] bob → (empty)
+> request_plan
+  [bus] lead → bob: (message) Please submit a plan for: Refactor the existing codebase ...
+[DBG:teammate:bob] stop_reason=end_turn msgs_in_context=3
+[DBG:teammate:bob] final text: No messages in my inbox yet. I'm standing by and ready to receive instructions.
+[DBG:teammate:bob] → idle loop (waiting for inbox)
+> check_inbox (×여러 번, 모두 empty)
+
+[DBG:bus:inbox] bob received 1 message(s):
+[DBG:bus:inbox]   from=lead type=message | Please submit a plan for: Refactor the existing codebase ...
+[DBG:teammate:bob] idle: received 1 message(s) → resuming
+[DBG:teammate:bob] ── round 3 ──
+... (bob이 코드베이스 분석: bash로 파일 목록, wc -l, grep def 등)
+[DBG:teammate:bob] ── round 6 ──
+[DBG:teammate:bob] tool=submit_plan input={"plan": "# Refactoring Plan ..."}
+[DBG:protocol:new] plan_approval request created: req=req_282644 sender=bob status=pending
+  [bus] bob → lead: (plan_approval_request) # Refactoring Plan ...
+[DBG:teammate:bob] → idle loop (waiting for inbox)
+[DBG:bus:inbox] bob → (empty)  ← (반복)
+
+> check_inbox
+[DBG:consume] non-protocol message: type=plan_approval_request from=bob
+> review_plan
+[DBG:lead] tool=review_plan input={"request_id": "req_282644", "approve": true, "feedback": "Great plan, Bob! ..."}
+  [bus] lead → bob: (plan_approval_response) Great plan, Bob! ...
+  [protocol] plan ✓ (req_282644)
+
+[DBG:bus:inbox] bob received 1 message(s):
+[DBG:bus:inbox]   from=lead type=plan_approval_response req=req_282644 | Great plan, Bob! ...
+[DBG:teammate:bob] idle: received 1 message(s) → resuming
+[DBG:teammate:bob] dispatch: type=plan_approval_response req=req_282644
+[DBG:teammate:bob] plan_approval_response received: approve=True feedback=Great plan, Bob! ...
+
+[DBG:lead] stop_reason=end_turn
+All done! Bob is now cleared to start the refactoring work!
+```
+
+</details>
+
+### 이 로그에서 주목할 점
+
+**① 잔여 inbox 메시지로 인한 예상치 못한 동작 (alice round 1)**
+
+```
+[DBG:teammate:alice] ── round 1 ──
+[DBG:bus:inbox] alice received 1 message(s):
+[DBG:bus:inbox]   from=lead type=message | Hi Alice! Please create a file called `schema.sql` ...
+```
+
+Lead가 이번 세션에서 보낸 건 `hello.txt`인데, alice는 round 1에서 `schema.sql`을 만들었다. 이전 실행에서 `.mailboxes/alice.jsonl`에 남아있던 메시지가 이번 세션에서 처리된 것이다. 코드를 반복 실행할 때 `.mailboxes/` 디렉토리를 정리하지 않으면 잔여 메시지가 다음 실행에 영향을 줄 수 있다.
+
+**② alice의 graceful shutdown 성공 — s15의 race condition 해결 확인**
+
+```
+[DBG:teammate:alice] ── round 2 ──
+[DBG:bus:inbox] alice received 2 message(s):
+[DBG:bus:inbox]   from=lead type=message        | Hi Alice! Please create a file called `hello.txt` ...
+[DBG:bus:inbox]   from=lead type=shutdown_request req=req_473139 | Please shut down gracefully.
+[DBG:teammate:alice] dispatch: type=shutdown_request req=req_473139
+[DBG:teammate:alice] shutdown_request received → sending shutdown_response approve=True
+```
+
+s15에서는 alice가 round 1에서 Lead의 메시지를 놓쳤지만, s16의 idle loop 덕분에 alice는 shutdown_request를 round 2에서 정확히 수신하고 graceful shutdown을 완료했다. 단, shutdown을 먼저 dispatch하면서 `hello.txt` 요청은 처리되지 못했다 — shutdown이 우선순위가 더 높기 때문이다.
+
+**③ Lead가 summary를 출력한 뒤에 protocol 상태가 전이됨**
+
+```
+[DBG:lead] stop_reason=end_turn
+All three steps are done! ...      ← Lead LLM이 먼저 출력
+
+(이후에)
+[DBG:protocol:match] state transition: pending → approved  ← 그다음 상태 전이
+```
+
+Lead의 LLM이 "완료됐다"고 출력한 시점에는 `pending_requests`가 아직 `pending`이다. protocol 상태가 `approved`로 전이되는 건 메인 루프의 `consume_lead_inbox`가 실행되는 그 다음 단계다. LLM의 판단과 실제 protocol 상태 전이는 서로 다른 타이밍에 일어난다.
+
+**④ bob의 idle loop → 재개 흐름**
+
+```
+[DBG:teammate:bob] final text: No messages in my inbox yet. I'm standing by...
+[DBG:teammate:bob] → idle loop (waiting for inbox)
+[DBG:bus:inbox] bob → (empty)  ← 1초마다 폴링
+...
+[DBG:bus:inbox] bob received 1 message(s): from=lead type=message
+[DBG:teammate:bob] idle: received 1 message(s) → resuming
+[DBG:teammate:bob] ── round 3 ──
+```
+
+bob이 round 2에서 idle loop에 진입하고, Lead의 `request_plan` 메시지를 받자 즉시 재개했다. s15에서 alice가 메시지를 놓쳤던 것과 달리, idle loop가 타이밍 문제를 구조적으로 해결하는 모습이 명확히 보인다.
+
+**⑤ plan_approval_request는 non-protocol로 분류됨**
+
+```
+[DBG:consume] non-protocol message: type=plan_approval_request from=bob
+```
+
+`consume_lead_inbox`는 `_response`로 끝나는 메시지만 `match_response`로 라우팅한다. `plan_approval_request`는 request(요청)이므로 non-protocol로 분류되어 LLM에게 그대로 전달되고, Lead가 직접 `review_plan` tool로 처리한다.
+
+**⑥ 멀티스레딩 print 충돌**
+
+```
+ rej[DBG:bus:inbox] bob → (empty)
+ec[DBG:bus:inbox] bob → (empty)
+t[DBG:bus:inbox] bob → (empty)
+```
+
+bob의 idle loop 폴링 로그와 Lead의 다른 출력이 동시에 찍히면서 글자가 섞였다. 여러 스레드가 동시에 `print`를 호출할 때 생기는 현상이다. 실제 CC가 teammate마다 별도 tmux pane을 쓰는 이유 중 하나다.
