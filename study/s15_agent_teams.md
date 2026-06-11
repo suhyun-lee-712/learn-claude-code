@@ -110,8 +110,16 @@ class MessageBus:
 
 파일 방식 = 속도는 조금 느리지만, **눈에 보이고, 죽어도 안 사라지고, 어디서든 접근 가능**하다.
 
-> 실제 CC도 파일 inbox(`~/.claude/teams/{teamName}/inboxes/{agentName}.json`)를 사용한다.  
-> 동시 쓰기 안전을 위해 `proper-lockfile`을 추가한다는 점이 교육용 버전과 다르다.
+### 교육용 버전 vs 실제 CC의 차이
+
+교육용 코드는 `MessageBus` 클래스를 통해 메시지를 주고받는다. 실제 CC는 더 직접적이다.  
+**각 Agent가 다른 Agent의 inbox 파일에 직접 쓴다** — 중앙 MessageBus 클래스가 없다.
+
+| | 교육용 (s15) | 실제 CC |
+|---|---|---|
+| inbox 경로 | `.mailboxes/{name}.jsonl` | `~/.claude/teams/{teamName}/inboxes/{agentName}.json` |
+| 파일 포맷 | JSONL (한 줄씩 append) | JSON 배열 (읽기 → append → 다시 쓰기) |
+| 동시 쓰기 | 락 없음 (race condition 가능) | `proper-lockfile` (최대 10회 재시도) |
 
 ### 통신은 항상 inbox를 통해서
 
@@ -125,6 +133,29 @@ Teammate → Teammate:  상대방 inbox에 append
 
 메시지 타입에 상관없이 **항상 받는 사람의 inbox 파일에 append**하는 방식으로 통일돼 있다.  
 Agent들이 서로의 존재를 직접 알 필요가 없다는 점이 핵심 — 이를 **느슨한 결합(loose coupling)** 이라고 한다.
+
+### 실제 CC의 메시지 타입 15가지
+
+교육용 코드는 `message`, `result` 두 가지만 쓰지만, 실제 CC에는 15가지 구조화된 메시지 타입이 있다.
+
+| Type | 방향 | 용도 |
+|---|---|---|
+| `plain text` | 양방향 | teammate 간 일반 통신 |
+| `idle_notification` | Teammate → Lead | teammate가 한 턴을 끝내고 idle 상태가 됨 |
+| `permission_request` | Teammate → Lead | teammate가 작업 승인을 필요로 함 |
+| `permission_response` | Lead → Teammate | Lead의 승인 결과 |
+| `plan_approval_request` | Teammate → Lead | teammate가 검토를 위해 plan 제출 |
+| `plan_approval_response` | Lead → Teammate | Lead의 plan 검토 |
+| `shutdown_request` | Lead → Teammate | graceful shutdown 요청 |
+| `shutdown_approved` | Teammate → Lead | shutdown 확인 |
+| `shutdown_rejected` | Teammate → Lead | shutdown 거절 (사유 포함) |
+| `task_assignment` | Lead → Teammate | task 할당 |
+| `team_permission_update` | Lead → Teammate | 권한 변경 broadcast |
+| `mode_set_request` | Lead → Teammate | teammate의 권한 mode 변경 |
+| `sandbox_permission_*` | 양방향 | 네트워크 권한 요청/응답 |
+| `teammate_terminated` | System | teammate 제거 알림 |
+
+텍스트 메시지는 모델에 전달하기 위해 `<teammate-message>` XML 태그로 감싸진다.
 
 ---
 
@@ -140,10 +171,10 @@ def spawn_teammate_thread(name, role, prompt):
         messages = [{"role": "user", "content": prompt}]
         sub_tools = [bash, read_file, write_file, send_message]  # 4개만
 
-        for _ in range(10):                      # 최대 10라운드 (교육용)
-            inbox = BUS.read_inbox(name)         # ① 편지 확인
+        for _ in range(10):                       # 최대 10라운드 (교육용)
+            inbox = BUS.read_inbox(name)          # ① 편지 확인
             if inbox:
-                messages.append(...)             # ② history에 주입
+                messages.append(...)              # ② history에 주입
             response = client.messages.create(...)# ③ LLM 호출
             # ... 도구 실행 ...
 
@@ -167,6 +198,41 @@ Lead가 `spawn_teammate("alice", "security reviewer", "Check auth module")` 을 
 교육용에서 의도적으로 줄인 것이다. 팀 간 통신 메커니즘에 집중하기 위해 bash, read, write, send_message만 남겼다.  
 실제 CC의 teammate는 `TaskCreate`, `TaskUpdate` 같은 task 관련 도구도 모두 갖는다.
 
+### 실제 CC의 Teammate 생명주기
+
+실제 CC에서 teammate는 `spawnTeammate()`로 생성된다 (`spawnMultiAgent.ts`):
+
+```
+1. Spawn:  tmux pane 생성(또는 in-process), 색상 할당, 팀 config 작성
+2. Work:   useInboxPoller가 1초마다 inbox 확인 → 메시지 도착 시 새 턴으로 제출
+3. Idle:   Stop hook 발동 → Lead에게 idle_notification 전송
+4. Shutdown: Lead가 shutdown_request 전송 → teammate가 shutdown_approved 응답 → Lead가 정리
+```
+
+교육용 코드의 teammate는 10라운드 후 자동 종료되지만, 실제 CC는 **idle loop**를 사용한다.  
+`idle_notification`을 보내고 inbox 메시지를 기다리다가, 메시지가 오면 재개하고, `shutdown_request`가 올 때만 종료한다.
+
+### 실제 CC의 팀 Config
+
+팀 정보는 `~/.claude/teams/{teamName}/config.json`에 저장된다:
+
+```json
+{
+  "name": "my-team",
+  "leadAgentId": "lead@my-team",
+  "members": [{
+    "agentId": "researcher@my-team",
+    "name": "researcher",
+    "agentType": "general-purpose",
+    "color": "blue",
+    "isActive": true
+  }]
+}
+```
+
+> **중요한 제약**: Teammate는 중첩될 수 없다.  
+> teammate가 다른 teammate를 spawn하는 것은 명시적으로 금지되어 있다 (`AgentTool.tsx:273`).
+
 ---
 
 ## 3. Inbox Injection: 팀원 결과를 Lead에게
@@ -183,6 +249,8 @@ if inbox:
 
 그냥 화면에 출력만 하는 게 아니라 **history에 넣어서 LLM이 읽게** 한다.  
 그래야 Lead가 "alice가 뭘 했는지"를 알고 다음 행동을 결정할 수 있다.
+
+> 실제 CC에서 Lead의 `useInboxPoller`는 1초마다 확인하며, 사용자 입력을 기다리지 않고 메시지를 **새 턴으로 즉시 제출**한다.
 
 ---
 
@@ -204,6 +272,18 @@ if inbox:
    → Lead LLM: "alice가 완료했다고 함. schema.sql 확인..."
 ```
 
+두 teammate가 병렬로 작업하는 경우:
+
+```
+1. Lead → spawn_teammate("alice", "backend dev", "Create database schema")
+2. Lead → spawn_teammate("bob",   "frontend dev", "Write API client")
+3. alice thread: write_file("schema.sql", ...)  ─┐ 병렬 실행
+4. bob thread:   write_file("client.ts", ...)   ─┘
+5. alice 완료 → BUS.send("alice", "lead", "Schema done")
+6. bob 완료  → BUS.send("bob",   "lead", "Client written")
+7. Lead inbox → 두 결과 모두 history에 주입 → LLM이 보고 다음 단계 조율
+```
+
 ---
 
 ## Permission Bubbling (실제 CC)
@@ -212,10 +292,11 @@ if inbox:
 
 ```
 1. Teammate → Lead inbox:  permission_request 전송
-2. Lead의 useInboxPoller (1초마다):  감지 → UI에 승인 대화창 표시
-3. 사용자 승인
-4. Lead → Teammate inbox:  permission_response 전송
-5. Teammate의 useSwarmPermissionPoller (500ms마다):  응답 수신 → 작업 재개
+2. Lead의 useInboxPoller (1초마다):  감지 → ToolUseConfirmQueue로 라우팅
+3. Lead UI:  teammate 이름과 색상이 표시된 승인 대화창 표시
+4. 사용자 승인
+5. Lead → Teammate inbox:  permission_response 전송
+6. Teammate의 useSwarmPermissionPoller (500ms마다):  응답 수신 → 작업 재개
 ```
 
 Teammate polling이 Lead(1초)보다 빠른(500ms) 이유: permission 응답을 받으면 **즉시 작업을 재개**해야 하기 때문이다.
