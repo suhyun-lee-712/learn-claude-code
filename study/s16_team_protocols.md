@@ -215,11 +215,31 @@ request_id로 찾는 것뿐 아니라 **type도 검증**한다. `shutdown_respon
 
 ## 5. consume_lead_inbox: 통합된 inbox 소비자
 
-s15에서는 `check_inbox` tool과 메인 loop가 각각 따로 inbox를 읽었다. s16에서는 둘 다 같은 함수를 통한다.
+s15에서는 inbox를 읽는 곳이 두 군데였다:
+- `check_inbox` tool — Lead LLM이 직접 호출할 때
+- 메인 loop 끝 — 매 턴마다 자동으로 확인
+
+s16에서 이 구조가 문제가 된다. `shutdown_response`가 Lead inbox에 들어왔다고 치자.
+
+```
+경우 A: 메인 loop가 먼저 읽음
+  → 메시지를 history에 주입 (LLM은 봄)
+  → 근데 match_response를 안 불렀으니 pending_requests 상태는 여전히 "pending"
+  → 핸드셰이크가 완료됐는데 Lead는 모름
+
+경우 B: check_inbox tool이 먼저 읽음
+  → match_response 호출 → pending_requests 상태 "approved"로 업데이트
+  → 파일은 소비(consume)됨
+  → 메인 loop가 나중에 읽으려 하면 이미 없음 → history 주입 안 됨
+```
+
+메시지를 읽으면 삭제(consume)되니까, 두 곳이 따로 읽으면 **읽기**와 **상태 업데이트** 중 하나가 반드시 빠진다.
+
+해결책이 `consume_lead_inbox`다. `check_inbox` tool도, 메인 loop도 이 함수 하나만 호출한다.
 
 ```python
 def consume_lead_inbox(route_protocol=True) -> list[dict]:
-    msgs = BUS.read_inbox("lead")
+    msgs = BUS.read_inbox("lead")       # 한 번만 읽음
     if route_protocol:
         for msg in msgs:
             meta = msg.get("metadata", {})
@@ -227,10 +247,10 @@ def consume_lead_inbox(route_protocol=True) -> list[dict]:
             msg_type = msg.get("type", "")
             if req_id and msg_type.endswith("_response"):
                 match_response(msg_type, req_id, meta.get("approve", False))
-    return msgs
+    return msgs                         # history 주입은 호출한 쪽에서
 ```
 
-protocol 메시지를 라우팅하지 않고 소비되는 상황을 방지한다. 메인 loop도 inbox 메시지를 history에 주입해 LLM이 반응할 수 있게 한다.
+읽기 + 상태 업데이트가 항상 같이 일어나니까, 어느 쪽이 먼저 호출하든 protocol 처리가 빠지는 일이 없다.
 
 ---
 
