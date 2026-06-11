@@ -612,12 +612,3 @@ bob이 round 2에서 idle loop에 진입하고, Lead의 `request_plan` 메시지
 
 `consume_lead_inbox`는 `_response`로 끝나는 메시지만 `match_response`로 라우팅한다. `plan_approval_request`는 request(요청)이므로 non-protocol로 분류되어 LLM에게 그대로 전달되고, Lead가 직접 `review_plan` tool로 처리한다.
 
-**⑥ 멀티스레딩 print 충돌**
-
-```
- rej[DBG:bus:inbox] bob → (empty)
-ec[DBG:bus:inbox] bob → (empty)
-t[DBG:bus:inbox] bob → (empty)
-```
-
-bob의 idle loop 폴링 로그와 Lead의 다른 출력이 동시에 찍히면서 글자가 섞였다. 여러 스레드가 동시에 `print`를 호출할 때 생기는 현상이다. 실제 CC가 teammate마다 별도 tmux pane을 쓰는 이유 중 하나다.
