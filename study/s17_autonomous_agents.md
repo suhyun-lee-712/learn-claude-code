@@ -98,6 +98,20 @@ def idle_poll(agent_name, messages, name, role) -> str:
 
 inbox가 태스크 보드보다 **우선순위가 높은 이유**: inbox에 shutdown_request 같은 프로토콜 메시지가 들어있을 수 있기 때문이다.
 
+### 실제 CC의 유휴 메커니즘
+
+교육용 `idle_poll()`은 하나의 함수로 inbox 확인과 태스크 claim을 모두 처리한다. 실제 CC는 네 가지 메커니즘을 조합한다:
+
+**idle_notification**: 한 라운드 작업 완료 후 `sendIdleNotification()`(`inProcessRunner.ts:569-589`)이 Lead에게 유휴 알림을 보낸다. Lead는 팀원이 새 태스크를 받을 수 있는 상태임을 알 수 있다.
+
+**mailbox polling**: `waitForNextPromptOrShutdown()`(`inProcessRunner.ts:689-868`)은 **500ms 폴링 루프**로 세 가지를 지속 확인한다: 대기 중인 사용자 메시지, mailbox 파일 메시지, 태스크 리스트. shutdown 요청이 우선순위를 가진다.
+
+**task watcher**: `useTaskListWatcher`(`hooks/useTaskListWatcher.ts:34-189`)는 `fs.watch()`로 `.claude/tasks/` 디렉터리를 1초 debounce로 모니터링한다. 새 태스크가 생기거나 의존성이 해제될 때 확인을 트리거한다.
+
+**active claiming**: 폴링 루프가 `tryClaimNextTask()`(`inProcessRunner.ts:853-860`)도 호출해서 능동적으로 태스크를 claim한다. "팀원이 알림을 기다리기만 한다"는 부정확하다 — 능동적인 폴링과 수동적인 알림이 모두 있다.
+
+교육용 `idle_poll()`은 이 네 가지 메커니즘을 하나로 통합한 단순화다.
+
 ---
 
 ## 2. scan_unclaimed_tasks: 태스크 보드 스캔
@@ -250,49 +264,6 @@ Lead는 1~5번만 하면 끝. 중간 태스크 할당 없음.
 | 팀원 tools | 5개 | 8개 (+list_tasks, claim_task, complete_task) |
 | 팀원 종료 시점 | 태스크 완료 후 | 60초 유휴 타임아웃 후 |
 | Identity 지속성 | system prompt만 | 압축 감지 후 자동 재주입 |
-
----
-
-## CC 소스 깊이 들여다보기
-
-<details>
-<summary>펼치기</summary>
-
-### 1. CC의 유휴 메커니즘: 단일 폴링이 아닌 결합 방식
-
-교육용 `idle_poll()`은 하나의 함수로 inbox 확인과 태스크 claim을 모두 처리한다. 실제 CC는 네 가지 메커니즘을 조합한다:
-
-**idle_notification**: 한 라운드 작업 완료 후 `sendIdleNotification()`(`inProcessRunner.ts:569-589`)이 Lead에게 유휴 알림을 보낸다. Lead는 팀원이 새 태스크를 받을 수 있는 상태임을 알 수 있다.
-
-**mailbox polling**: `waitForNextPromptOrShutdown()`(`inProcessRunner.ts:689-868`)은 **500ms 폴링 루프**로 세 가지를 지속 확인한다: 대기 중인 사용자 메시지, mailbox 파일 메시지, 태스크 리스트. shutdown 요청이 우선순위를 가진다.
-
-**task watcher**: `useTaskListWatcher`(`hooks/useTaskListWatcher.ts:34-189`)는 `fs.watch()`로 `.claude/tasks/` 디렉터리를 1초 debounce로 모니터링한다. 새 태스크가 생기거나 의존성이 해제될 때 확인을 트리거한다.
-
-**active claiming**: 폴링 루프가 `tryClaimNextTask()`(`inProcessRunner.ts:853-860`)도 호출해서 능동적으로 태스크를 claim한다. "팀원이 알림을 기다리기만 한다"는 부정확하다 — 능동적인 폴링과 수동적인 알림이 모두 있다.
-
-### 2. 태스크 Claim: File Lock + Atomic 연산
-
-`claimTask()`(`utils/tasks.ts:541-612`)는 `proper-lockfile` 태스크 수준 lock을 사용해 lock 안에서 read-check-modify-write를 수행한다.
-
-체크 항목: owner 이미 존재, 이미 완료, blockedBy에 미완료 의존성 존재.
-
-`claimTaskWithBusyCheck()`(`utils/tasks.ts:614-692`)는 태스크 리스트 수준 lock으로 busy 체크와 claim을 atomic하게 만들어 TOCTOU(Time-Of-Check-Time-Of-Use) 문제를 방지한다.
-
-### 3. 교육용 vs CC 비교
-
-| 차원 | 교육용 (s17) | CC |
-|---|---|---|
-| 유휴 메커니즘 | idle_poll 단일 폴링 (5초) | idle_notification + 500ms mailbox polling + task watcher |
-| 태스크 발견 | scan_unclaimed_tasks (파일 폴링) | useTaskListWatcher (파일 watching) + tryClaimNextTask (능동 폴링) |
-| 의존성 체크 | can_start (blockedBy 모두 completed) | findAvailableTask (동일 의미) |
-| 동시성 안전성 | owner 체크만 (file lock 없음) | proper-lockfile 태스크 lock + 태스크 리스트 lock |
-| shutdown | IDLE: idle_poll 직접 처리, WORK: handle_inbox_message 경유 | 500ms 폴링 루프가 shutdown_request 우선 처리 |
-| 타임아웃 종료 | 60초 하드코딩 | 고정 타임아웃 없음, Lead가 shutdown 요청 |
-| Identity 지속성 | messages 길이 감지 후 수동 재주입 | context compaction이 system prompt 자동 보존 |
-
-교육용 `idle_poll()`은 CC의 네 가지 메커니즘을 하나로 통합한 단순화다. 핵심 의미(유휴 시 일 탐색, 의존성 해제 시 claim, shutdown 우선)가 일관되게 유지된다.
-
-</details>
 
 ---
 
