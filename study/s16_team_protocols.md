@@ -277,6 +277,23 @@ alice가 일을 마쳐도 종료하지 않고 기다린다. Lead가 메시지를
 
 ---
 
+## 실제 CC의 Protocol 타입
+
+교육용 코드는 shutdown과 plan_approval 두 가지만 구현했지만, 실제 CC에는 request-response 패턴을 쓰는 protocol이 더 있다.
+
+| Protocol | 메시지 타입 | 방향 |
+|---|---|---|
+| Shutdown | `shutdown_request` / `shutdown_approved` / `shutdown_rejected` | Lead → Teammate |
+| Plan approval | `plan_approval_request` / `plan_approval_response` | Teammate → Lead |
+| Permission | `permission_request` / `permission_response` | Teammate → Lead |
+| Sandbox permission | `sandbox_permission_*` | 양방향 |
+
+Permission은 s15에서 배운 **Permission Bubbling**이다. 팀원이 위험한 작업을 만났을 때 사용자 승인을 요청하는 흐름인데, 내부적으로 동일한 request_id 기반 handshake를 사용한다.
+
+이 모든 protocol이 같은 FSM(pending → approved | rejected)을 공유한다. 교육용의 단일 ProtocolState 구조가 실제 CC에도 그대로 적용되는 이유다.
+
+---
+
 ## s15에서 달라진 점
 
 | 구성 요소 | s15 | s16 |
@@ -374,6 +391,7 @@ bob이 bash 호출 시도
 
 | | 교육용 | 실제 CC |
 |---|---|---|
+| Protocol 종류 | shutdown, plan_approval (2개) | shutdown, plan_approval, permission, sandbox_permission (4개+) |
 | Shutdown | 2자 (request/response) | 3자 (+ CC 런타임의 terminated) |
 | Plan approval | 수동 approve | 자동 생성 + 협상 가능 |
 | 메시지 포맷 | dict | Zod 검증 JSON |
