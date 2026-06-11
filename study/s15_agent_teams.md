@@ -507,7 +507,9 @@ Here's the verification result:
 (나중에) [bus] lead → alice: Hi Alice! ...  ← 편지를 보냈지만 alice는 이미 없음
 ```
 
-spawn과 send_message 사이에 타이밍 차이가 있다. alice가 round 1을 먼저 돌고 종료된 뒤 메시지가 도착했다. 이것이 s15 교육용 코드의 10라운드 제한 방식이 가진 한계다. 실제 CC의 idle loop라면 alice가 메시지를 기다리고 있었을 것이다.
+spawn과 send_message 사이에 타이밍 차이가 있다. alice가 round 1을 먼저 돌고 종료된 뒤 메시지가 도착했다.
+
+근본 원인은 10라운드 제한이 아니라 **idle loop의 부재**다. 교육용 코드는 스레드가 시작되자마자 즉시 round 1을 실행한다. 실제 CC라면 alice는 시작 후 `idle_notification`을 보내고 메시지가 올 때까지 기다린다 — Lead의 send_message가 언제 오든 놓치지 않는다. 10라운드를 100라운드로 늘려도 이 race condition 자체는 그대로다.
 
 **② Lead가 직접 보완**
 
@@ -525,6 +527,17 @@ alice가 응답하지 않자 Lead가 alice의 inbox를 몇 번 확인(`check_inb
 ```
 
 bob은 round 1에서 자기 소개 메시지를 보내고, round 2에서 Lead의 지시를 inbox로 받아 실제 작업을 수행했다. Lead와 bob이 비동기로 동시에 실행되면서 메시지를 주고받는 흐름이 명확히 보인다.
+
+**왜 alice는 실패하고 bob은 성공했나?** 실행 순서 때문이다.
+
+```
+spawn alice   → alice thread 시작 (즉시 round 1)
+spawn bob     → bob thread 시작 (즉시 round 1)
+send_message("alice", ...)   ← alice는 이미 round 1 끝내고 inbox 지나침
+send_message("bob", ...)     ← bob은 round 1 마치고 inbox 대기 중 → 수신 성공
+```
+
+alice는 spawn → send_message 간격이 짧아서 Lead의 메시지가 늦게 도착했다. bob은 alice에게 먼저 메시지를 보내는 시간만큼 간격이 벌어져, bob의 round 1이 끝날 타이밍에 맞게 메시지가 도착했다. 둘 다 동일한 race condition을 가지고 있고, bob은 우연히 타이밍이 맞아떨어진 것이다.
 
 **④ 마지막 inbox injection**
 
