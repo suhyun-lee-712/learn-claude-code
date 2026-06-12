@@ -504,7 +504,19 @@ auto-claim 설계 의도대로 동작한 건 Case 2다.
 
 `idle_poll`의 auto-claim은 "WORK를 마쳤는데 새 태스크가 나타났을 때"를 위한 fallback이다. LLM이 WORK 중에 이미 claim할 수 있으면 idle_poll이 끼어들 자리가 없다. 실제 사용 시 "한 번에 하나만 claim해" 같은 지시를 prompt에 추가해야 분배가 고르게 된다.
 
-**② Case 2: alice가 WORK cycle을 3번 순환**
+**② Case 1: alice가 claim 실패 후 `/output/`에 파일을 쓰려 했다**
+
+```
+alice round=3: claim_task → 전부 실패 (in_progress)
+alice round=4: write_file("/output/addition.js", ...)  ← 지시받지 않은 경로
+               tool_result: Error: Path escapes workspace
+```
+
+alice의 initial prompt는 "claim a pending task, complete the actual work"였다. claim은 실패했지만 "완료해야 한다"는 지시는 여전히 유효하니까, LLM이 스스로 추론했다: "bob이 같은 디렉터리에 쓰고 있으니 충돌을 피하려면 `/output/`에 따로 쓰면 되겠다."
+
+`/output/`는 지시받지 않았고 실제로 존재하지도 않는 경로다. 목표(`complete the work`)와 제약(`claim 실패`) 사이에서 막히자 LLM이 합리적으로 보이는 우회로를 스스로 만들어낸 것이다. `safe_path()` 체크가 없었다면 실제로 파일이 생성됐을 것이다.
+
+**③ Case 2: alice가 WORK cycle을 3번 순환**
 
 ```
 alice: WORK(cycle=1) → IDLE → auto-claim addition  → WORK(cycle=2)
