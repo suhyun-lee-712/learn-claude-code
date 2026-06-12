@@ -514,3 +514,109 @@ alice: WORK(cycle=1) → IDLE → auto-claim addition  → WORK(cycle=2)
 
 하나의 태스크를 마칠 때마다 IDLE로 돌아가 새 태스크를 찾는 WORK↔IDLE 반복 구조가 실제로 동작하는 모습이다.
 
+---
+
+### Case 3: 의존성 체인 (Task A → Task B)
+
+<details>
+<summary>전체 로그 펼치기</summary>
+
+```
+s17 >> Spawn alice and bob. Do NOT create any tasks yet — just spawn them and wait
+> spawn_teammate: alice (developer)
+> spawn_teammate: bob (developer)
+
+[DBG:teammate:alice] ── WORK cycle=1 round=1 ──
+[DBG:bus:inbox] alice → (empty)
+[DBG:teammate:alice] tool=list_tasks → No tasks.
+[DBG:teammate:alice] tool=send_message input={"to": "manager", ...}   ← "manager"로 전송
+  [bus] alice → manager: Hi, this is Alice. I'm online and ready to work.
+
+[DBG:teammate:bob] ── WORK cycle=1 round=1 ──
+[DBG:bus:inbox] bob → (empty)
+[DBG:teammate:bob] tool=list_tasks → No tasks.
+[DBG:teammate:bob] tool=send_message input={"to": "manager", ...}     ← "manager"로 전송
+  [bus] bob → manager: Hi, I'm Bob. I'm ready and waiting for instructions.
+
+[DBG:teammate:alice] stop_reason=end_turn → IDLE 진입
+[DBG:teammate:bob]   stop_reason=end_turn → IDLE 진입
+
+s17 >> Create task A: "Write a hello.py file that prints Hello World".
+       Create task B that is blocked by task A: "Write a goodbye.py file that prints Goodbye".
+> create_task: Write a hello.py file that prints Hello World  → task_..._1454
+> create_task: Write a goodbye.py file that prints Goodbye
+               (blockedBy: task_..._1454)                     → task_..._6401
+
+[DBG:idle:poll] bob poll #3/12
+[DBG:idle:scan] bob scan_unclaimed_tasks → 1 found   ← Task A만 (Task B는 blockedBy 미충족)
+  [claim] Write a hello.py file that prints Hello World → in_progress
+  [idle] bob auto-claimed: Write a hello.py file that prints Hello World
+[DBG:teammate:bob] ── WORK cycle=2 round=1 ──
+
+[DBG:idle:poll] alice poll #3/12
+[DBG:idle:scan] alice scan_unclaimed_tasks → 0 found  ← bob이 이미 가져감
+
+[DBG:teammate:bob] tool=write_file input={"path": "hello.py", "content": "print(\"Hello World\")\n"}
+  Wrote 21 bytes to hello.py
+[DBG:teammate:bob] tool=bash input={"command": "python3 hello.py"}
+  Hello World
+[DBG:teammate:bob] tool=complete_task input={"task_id": "task_..._1454"}
+  [complete] Write a hello.py file that prints Hello World ✓
+  tool_result: Completed task_..._1454
+               Unblocked: Write a goodbye...   ← 의존성 해제 알림
+
+[DBG:idle:poll] alice poll #6/12
+[DBG:idle:scan] alice scan_unclaimed_tasks → 1 found  ← Task B (이제 can_start = True)
+  [claim] Write a goodbye.py file that prints Goodbye → in_progress
+  [idle] alice auto-claimed: Write a goodbye.py file that prints Goodbye
+[DBG:teammate:alice] ── WORK cycle=2 round=1 ──
+
+[DBG:teammate:bob] stop_reason=end_turn → IDLE 진입
+
+[DBG:teammate:alice] tool=write_file input={"path": "goodbye.py", "content": "print(\"Goodbye\")\n"}
+  Wrote 17 bytes to goodbye.py
+[DBG:teammate:alice] tool=bash input={"command": "python3 goodbye.py"}
+  Goodbye
+[DBG:teammate:alice] tool=complete_task input={"task_id": "task_..._6401"}
+  [complete] Write a goodbye.py file that prints Goodbye ✓
+[DBG:teammate:alice] stop_reason=end_turn → IDLE 진입
+
+[DBG:idle:poll] bob  poll #1~12 → 0 found → timeout → SHUTDOWN
+[DBG:idle:poll] alice poll #1~12 → 0 found → timeout → SHUTDOWN
+```
+
+</details>
+
+### 이 로그에서 주목할 점
+
+**① 의존성 체인 정상 동작**
+
+bob이 Task A를 `complete_task`로 완료하는 순간 `can_start(Task B)`가 True로 바뀌었고, alice의 다음 poll에서 즉시 잡혔다.
+
+```
+bob: complete_task(Task A) → Unblocked: "Write a goodbye.py..."
+alice poll #6: scan → 1 found → auto-claim Task B → WORK cycle=2
+```
+
+`complete_task()` 내부에서 의존성이 해제된 태스크 목록을 반환(`Unblocked: ...`)해주는데, 이게 곧 `scan_unclaimed_tasks`에서 Task B가 잡히기 시작하는 시점이다.
+
+**② alice가 Task A를 못 가져간 이유**
+
+bob poll #3과 alice poll #3이 거의 동시에 실행됐는데 bob이 아주 조금 먼저였다. alice가 scan할 시점에 Task A는 이미 `in_progress`라 `status == "pending"` 조건을 통과하지 못했고, Task B는 `can_start = False`라서 0개를 반환했다.
+
+**③ `send_message("manager", ...)` — 아무도 못 받은 메시지**
+
+```
+[DBG:lead] tool=spawn_teammate input={
+  "prompt": "Wait for instructions from your manager..."
+}                                              ↑
+                             Lead LLM이 spawn prompt를 자유롭게 작성
+
+alice: send_message("manager", "Hi, I'm ready...")
+bob:   send_message("manager", "Hi, I'm ready...")
+  → .mailboxes/manager.jsonl에 쓰이지만 아무도 읽지 않음
+  → Lead inbox 이름은 "lead"
+```
+
+Lead LLM이 팀원의 spawn prompt를 자유롭게 작성하면서 자기 자신을 "manager"로 소개했다. 팀원은 그 지시를 따라 `send_message("manager", ...)`를 호출했지만 Lead는 `"lead"` 이름으로만 inbox를 확인하므로 메시지가 유실됐다. spawn prompt에 `"Send results to 'lead'"` 처럼 inbox 이름을 명시해두는 것이 안전하다.
+
